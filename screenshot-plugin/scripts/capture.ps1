@@ -77,8 +77,8 @@ if ($mode -eq "hotkey") {
   $cfg = Get-Content $config -Raw | ConvertFrom-Json
   $cfg.hotkey = $hotkeyText
   $cfg | ConvertTo-Json | Set-Content -Encoding UTF8 $config
-  # 通知运行中的监听器热重载热键
-  try { [System.Threading.EventWaitHandle]::OpenExisting("Local\ZCodeShotReload").Set() | Out-Null } catch {}
+  # 通知运行中的监听器热重载热键（写计数文件，跨权限级别可用）
+  Set-Content -Path (Join-Path $base "reload") -Value ([DateTime]::UtcNow.Ticks) -Encoding ASCII
   Write-Output "已把截图快捷键改为 $hotkeyText"
   exit 0
 }
@@ -94,26 +94,26 @@ if ($mode -eq "status") {
 }
 
 # ---- 确保监听器运行（"启动"模式到此为止；截图模式继续触发） ----
-$running = Get-Process -Name "capture" -ErrorAction SilentlyContinue
-if (-not $running) {
+# 并发拉起保护：多个会话启动同时跑本脚本时，只有一个真正去 Start-Process
+$spawnLock = New-Object System.Threading.Mutex($false, "Local\ZCodeShotSpawnLock")
+$lockTaken = $false
+try { $lockTaken = $spawnLock.WaitOne(5000) } catch { $lockTaken = $false }
+try {
+  # 无条件拉起：新版实例用带版本的互斥锁自我去重，多起的会立刻退出。
+  # 不能按进程名判断——旧版遗留的僵尸进程会让这里永远跳过启动。
   Start-Process -FilePath $exe -WindowStyle Hidden
-  # 等待监听器创建好事件句柄（比固定 sleep 更快也更可靠）；句柄尚未创建时视为未就绪，继续轮询
-  $handleReady = $false
-  $deadline = (Get-Date).AddSeconds(5)
-  while ((Get-Date) -lt $deadline) {
-    try { if ([System.Threading.EventWaitHandle]::OpenExisting("Local\ZCodeShotTrigger")) { $handleReady = $true; break } }
-    catch [System.Threading.WaitHandleCannotBeOpenedException] { }
-    catch { }
-    Start-Sleep -Milliseconds 50
-  }
-  if (-not $handleReady) { Write-Output "监听器启动失败"; exit 1 }
+  Start-Sleep -Milliseconds 400
+} finally {
+  if ($lockTaken) { try { $spawnLock.ReleaseMutex() } catch {} }
+  $spawnLock.Dispose()
 }
 if ($mode -eq "start") { Write-Output "截图监听器已就绪（Ctrl+Alt+A 框选截图，ZCode 退出后自动退出）"; exit 0 }
 
 # ---- 截图：触发 -> 等待 latest.txt 更新 ----
 $latest = Join-Path $base "latest.txt"
 $before = if (Test-Path $latest) { (Get-Item $latest).LastWriteTimeUtc } else { [DateTime]::MinValue }
-[System.Threading.EventWaitHandle]::OpenExisting("Local\ZCodeShotTrigger").Set() | Out-Null
+# 写计数文件触发（监听器轮询其变化），跨权限级别可用
+Set-Content -Path (Join-Path $base "trigger") -Value ([DateTime]::UtcNow.Ticks) -Encoding ASCII
 
 $timeout = (Get-Date).AddSeconds(120)
 while ((Get-Date) -lt $timeout) {

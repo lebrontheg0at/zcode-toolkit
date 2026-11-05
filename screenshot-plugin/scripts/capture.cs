@@ -73,7 +73,20 @@ namespace ZCodeShot
         static readonly string LatestPath = Path.Combine(BaseDir, "latest.txt");
         static readonly string HotkeyErrorPath = Path.Combine(BaseDir, "hotkey-error.log");
 
-        static EventWaitHandle _trigger, _reload;
+        // 触发改用「计数文件」而不是命名事件：普通权限进程打不开提权进程创建的事件（ACL），
+        // 会导致按钮点了毫无反应。文件双方都能读写，没有权限问题。
+        static long _lastTrigger, _lastReload;
+        static long 读计数(string 名)
+        {
+            try
+            {
+                var p = Path.Combine(BaseDir, 名);
+                if (!File.Exists(p)) return 0;
+                long v;
+                return long.TryParse(File.ReadAllText(p).Trim(), out v) ? v : 0;
+            }
+            catch { return 0; }
+        }
 
         const int HotkeyId = 0xB00B;       // 截图（不隐藏窗口）
         const int EscHotkeyId = 0xB00C;    // 框选期间临时占用 ESC（遮罩不抢焦点，收不到按键）
@@ -142,13 +155,20 @@ namespace ZCodeShot
                         DestroyWindow(_overlay);
                         return IntPtr.Zero;
                     }
-                    if (_reload.WaitOne(0))
+                    if (读计数("reload") != _lastReload)
                     {
+                        _lastReload = 读计数("reload");
                         UnregisterHotKey(h, HotkeyId);
                         LoadConfig();
                         LogHotkeyFailure(RegisterHotKey(h, HotkeyId, _mods, _vk), true);
                     }
-                    if (_trigger.WaitOne(0)) { Dbg("trigger"); _lastActive = DateTime.Now; DoCapture(); } // 脚本触发
+                    if (读计数("trigger") != _lastTrigger)
+                    {
+                        _lastTrigger = 读计数("trigger");
+                        Dbg("trigger(file)");
+                        _lastActive = DateTime.Now;
+                        DoCapture();
+                    }
                     else
                     {
                         // 每 5 秒检查一次：ZCode 进程连续 60 秒不存在则退出；idleMinutes>0 时空闲超时也退出
@@ -336,11 +356,12 @@ namespace ZCodeShot
             SetProcessDPIAware();
             Directory.CreateDirectory(ShotsDir);
             bool createdNew;
-            using (var mutex = new Mutex(true, "Local\\ZCodeShotMutex", out createdNew))
+            // 互斥名带版本号：旧版（事件机制）遗留进程可能还活着，换名字让新版能正常启动
+            using (var mutex = new Mutex(true, "Local\\ZCodeShotMutex3", out createdNew))
             {
                 if (!createdNew) return; // 已有实例在运行
-                _trigger = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\ZCodeShotTrigger");
-                _reload = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\ZCodeShotReload");
+                _lastTrigger = 读计数("trigger");
+                _lastReload = 读计数("reload");
                 LoadConfig();
 
                 var overlayClass = new WNDCLASS

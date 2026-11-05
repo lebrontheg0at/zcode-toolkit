@@ -160,23 +160,17 @@
 
     function triggerScreenshot(hide) {
       try {
-        var sig = path.join(os.tmpdir(), 'zcode-tokbar-signal.ps1');
-        var L = String.fromCharCode(10);
-        fs.writeFileSync(sig,
-          'try {' + L +
-          '  [System.Threading.EventWaitHandle]::OpenExisting("Local\\ZCodeShotTrigger").Set()' + L +
-          '  Write-Host "signaled"' + L +
-          '} catch {' + L +
-          '  Write-Host ("ERROR: " + $_.Exception.Message)' + L +
-          '}' + L, 'utf8');
+        // 触发改用计数文件：监听器每 200ms 比对内容变化。
+        // 不再 spawn powershell 去 Set 命名事件 —— 那个方式在监听器被提权启动时
+        // 因事件 ACL 打不开而静默失败，还会闪一个控制台窗口。
+        var trig = path.join(os.homedir(), '.zcode', 'screenshot', 'trigger');
 
         var doSignal = function () {
-          cp.exec('powershell -NoProfile -ExecutionPolicy Bypass -File "' + sig + '"',
-            { timeout: 10000, windowsHide: true },
-            function(err, stdout) {
-              _log('shot', 'result: err=' + (err ? err.message : 'null') + ' out=' + String(stdout).trim());
-            }
-          );
+          try {
+            fs.mkdirSync(path.dirname(trig), { recursive: true });
+            fs.writeFileSync(trig, String(Date.now()) + String.fromCharCode(10));
+            _log('shot', 'trigger file written');
+          } catch (e) { _log('shot-write', e); }
         };
 
         if (hide) {
