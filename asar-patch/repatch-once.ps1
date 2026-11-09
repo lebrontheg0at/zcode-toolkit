@@ -1,8 +1,12 @@
-# Waits for ZCode to exit, then re-applies the tokbar app.asar patch and restarts ZCode.
+﻿# Waits for ZCode to exit, then re-applies the tokbar app.asar patch and restarts ZCode.
 # Uses the snippet content hash, so a patch upgrade is always picked up.
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $log = Join-Path $here 'auto-install.log'
+
+# 单实例：并发/重复启动的监视器直接退出
+$watcherMutex = New-Object System.Threading.Mutex($false, 'Local\ZCodeToolkitWatcher')
+if (-not $watcherMutex.WaitOne(0)) { exit 0 }
 
 function L($m) {
   Add-Content -Path $log -Value ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) -Encoding UTF8

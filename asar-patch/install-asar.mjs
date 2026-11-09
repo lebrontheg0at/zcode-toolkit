@@ -135,6 +135,20 @@ if (mode === 'check') {
   process.exit(0);
 }
 
+// --needs-update：只读判断，ZCode 运行中也能用。退出码 0=最新，1=缺失/过期，2=包不存在
+if (process.argv.includes('--needs-update')) {
+  if (!fs.existsSync(ASAR)) process.exit(2);
+  const { json: j } = readArchive(ASAR);
+  const htmlEntry = findEntry(j, 'out/renderer/index.html');
+  if (!htmlEntry) process.exit(1);
+  const fd = fs.openSync(ASAR, 'r');
+  const { dataStart: ds } = readArchive(ASAR);
+  const b = Buffer.alloc(htmlEntry.size);
+  fs.readSync(fd, b, 0, htmlEntry.size, ds + Number(htmlEntry.offset));
+  fs.closeSync(fd);
+  process.exit(b.toString('utf8').includes(HASH_HTML) ? 0 : 1);
+}
+
 if (!process.env.TOKBAR_ASAR && zcodeRunning()) {
   console.error('[X] ZCode 正在运行，app.asar 被占用。请先完全退出 ZCode。');
   process.exit(2);
@@ -153,10 +167,57 @@ if (mode === 'restore') {
 
 /* ---- install ---- */
 
-// --force：已有备份时先还原到备份，再按最新片段重打（用于修复补丁本身）
-if (process.argv.includes('--force') && fs.existsSync(BAK)) {
+// 读 asar 里 package.json 的 version（用来识别 ZCode 是否升级过）
+function versionOf(asarPath) {
+  try {
+    return JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8')).version || null;
+  } catch {
+    return null;
+  }
+}
+
+// 把备份还原到 ASAR——仅当备份与当前包是同一个 ZCode 版本。
+// ZCode 升级后旧备份是旧版本的 asar，覆盖回去等于降级/搞坏程序。
+function restoreBackupIfSameVersion() {
+  if (!fs.existsSync(BAK)) return false;
+  const cur = versionOf(ASAR);
+  const bak = versionOf(BAK);
+  if (cur && bak && cur !== bak) {
+    const stale = BAK + '.stale-' + bak;
+    console.log('[guard] 备份是 ZCode ' + bak + '，当前是 ' + cur + '：丢弃旧备份，按当前包重打');
+    try { fs.renameSync(BAK, stale); } catch { fs.rmSync(BAK, { force: true }); }
+    return false;
+  }
   console.log('[force] 还原到备份后重打 ...');
   fs.copyFileSync(BAK, ASAR);
+  return true;
+}
+
+// --needs-update：退出码 0=补丁已是最新，1=缺失或过期（供 hook 自动化判断）
+if (process.argv.includes('--needs-update')) {
+  if (!fs.existsSync(ASAR)) process.exit(2);
+  const { json: j } = readArchive(ASAR);
+  const htmlEntry = findEntry(j, 'out/renderer/index.html');
+  if (!htmlEntry) process.exit(1);
+  const html = readEntryBufLater(htmlEntry).toString('utf8');
+  process.exit(html.includes(HASH_HTML) ? 0 : 1);
+}
+
+function readEntryBufLater(entry) {
+  const { dataStart: ds } = readArchive(ASAR);
+  const fd = fs.openSync(ASAR, 'r');
+  try {
+    const b = Buffer.alloc(entry.size);
+    fs.readSync(fd, b, 0, entry.size, ds + Number(entry.offset));
+    return b;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// --force：已有备份时先还原到备份，再按最新片段重打（用于修复补丁本身）
+if (process.argv.includes('--force') && fs.existsSync(BAK)) {
+  restoreBackupIfSameVersion();
 }
 
 
@@ -193,7 +254,7 @@ if (oldHtml.includes(MARK_RENDER)) {
   // 补丁内容已更新：先还原到干净备份再重打，否则会在旧补丁上再叠一层
   if (fs.existsSync(BAK) && !process.env.TOKBAR_REFRESHED) {
     console.log('[refresh] 检测到片段已更新（hash ' + SNIPPET_HASH + '），从备份还原后重打 ...');
-    fs.copyFileSync(BAK, ASAR);
+    restoreBackupIfSameVersion();
     const { spawnSync } = await import('node:child_process');
     const r = spawnSync(process.execPath, process.argv.slice(1), {
       stdio: 'inherit',

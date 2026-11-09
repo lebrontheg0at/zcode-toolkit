@@ -61,7 +61,9 @@ if (hasStart && hasEnd) {
   process.exit(2);
 }
 
-if (!fs.existsSync(BAK)) fs.copyFileSync(bundle, BAK);
+// 备份始终指向「当前版本的原始包」：ZCode 升级会整个替换 zcode.cjs，
+// 旧备份留着只会让人 --restore 时把新版本搞坏。
+fs.writeFileSync(BAK, base, 'utf8');
 
 const next = base.replace(/\s+$/, '') + '\n\n' + BLOCK + '\n';
 fs.writeFileSync(bundle, next, 'utf8');

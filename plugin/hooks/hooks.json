@@ -12,8 +12,8 @@
               "-NoProfile",
               "-ExecutionPolicy",
               "Bypass",
-              "-Command",
-              "$exe='D:\\nodejs\\node.exe'; $root=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent '$env:ZCODE_PLUGIN_ROOT'))); $log=Join-Path $root 'asar-patch\\auto-install.log'; foreach($rel in @('asar-patch\\install-asar.mjs','agent-patch\\install-agent-fix.mjs')){ $m=Join-Path $root $rel; if((Test-Path $m) -and (Test-Path $exe)){ & $exe $m 2>&1 | Out-File -Append $log } }"
+              "-File",
+              "C:\\Users\\Saber\\.zcode\\workspace\\default\\zcode-tokmeter\\asar-patch\\session-start.ps1"
             ],
             "timeoutMs": 120000,
             "async": true,
