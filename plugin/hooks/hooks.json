@@ -6,18 +6,8 @@
         "matcher": "startup|resume|clear",
         "hooks": [
           {
-            "type": "process",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "C:\\Users\\Saber\\.zcode\\workspace\\default\\zcode-tokmeter\\asar-patch\\session-start.ps1"
-            ],
-            "timeoutMs": 120000,
-            "async": true,
-            "statusMessage": "ZCode Toolkit: checking patches…"
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\Saber\\.zcode\\workspace\\default\\zcode-tokmeter\\asar-patch\\session-start.ps1\""
           }
         ]
       }
