@@ -153,8 +153,15 @@
         "'" + '@' + L +
         '$p = Get-Process ZCode -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }' + L +
         'if($p){' + L +
-        '  if($mode -eq "min"){ $p | ForEach-Object { if(-not [ZW]::IsIconic($_.MainWindowHandle)){ [ZW]::ShowWindow($_.MainWindowHandle,6) } } }' + L +
-        '  else{ $p | ForEach-Object { if([ZW]::IsIconic($_.MainWindowHandle)){ [ZW]::ShowWindow($_.MainWindowHandle,9) }; Start-Sleep -Milliseconds 120; [ZW]::Nudge($_.MainWindowHandle) } }' + L +
+        // hide=SW_HIDE(0)：瞬间隐藏、无最小化动画（动画期间抓屏会截到缩到一半的窗口）
+        '  if($mode -eq "min"){ $p | ForEach-Object { [ZW]::ShowWindow($_.MainWindowHandle,0) } }' + L +
+        '  else{' + L +
+        '    $p | ForEach-Object {' + L +
+        '      [ZW]::ShowWindow($_.MainWindowHandle,5);' + L +   // SW_SHOW：按原来的位置/大小直接显示，不播放还原动画
+        '    };' + L +
+        '    Start-Sleep -Milliseconds 120;' + L +
+        '    $p | ForEach-Object { [ZW]::Nudge($_.MainWindowHandle) }' + L +
+        '  }' + L +
         '}' + L, 'utf8');
     }
 
@@ -174,15 +181,15 @@
         };
 
         if (hide) {
-          // 先隐藏 → 等 500ms → 触发截图 → 等 2000ms → 恢复
+          // SW_HIDE 是瞬时的（无最小化动画）→ 200ms 足够让桌面重绘；恢复也用 SW_SHOW 不播动画
           ensureWinPs();
           cp.exec('powershell -NoProfile -ExecutionPolicy Bypass -File "' + WIN_PS + '" -mode min',
             { timeout: 3000, windowsHide: true }, function() {});
-          setTimeout(doSignal, 500);
+          setTimeout(doSignal, 200);
           setTimeout(function () {
             cp.exec('powershell -NoProfile -ExecutionPolicy Bypass -File "' + WIN_PS + '" -mode restore',
               { timeout: 3000, windowsHide: true }, function() {});
-          }, 2500);
+          }, 2200);
         } else {
           doSignal();
         }
