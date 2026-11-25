@@ -398,6 +398,29 @@ namespace ZCodeShot
             }
         }
 
+        // 截图前把 ZCode 瞬间藏起来（SW_HIDE，无最小化动画），截完再显示。
+        // 由监听器自己做，不依赖主进程补丁——主进程那半要等 ZCode 重启才生效。
+        static IntPtr _hiddenByUs = IntPtr.Zero;
+
+        static void HideTarget(IntPtr h)
+        {
+            if (h == IntPtr.Zero || !IsWindowVisible(h)) return;
+            ShowWindow(h, SW_HIDE);
+            _hiddenByUs = h;
+            Dbg("hide target for capture");
+        }
+
+        static void ShowTargetBack()
+        {
+            var h = _hiddenByUs;
+            _hiddenByUs = IntPtr.Zero;
+            if (h == IntPtr.Zero || !IsWindow(h)) return;
+            ShowWindow(h, SW_SHOW);   // 非动画方式显示，避免还原动画
+            Thread.Sleep(80);
+            NudgeRepaint(h);          // 防 Electron 合成器不出帧导致整窗纯黑
+            Dbg("target shown back");
+        }
+
         static void DoCapture()
         {
             if (_capturing) return; // 已有遮罩在框选，忽略重复触发
@@ -406,7 +429,15 @@ namespace ZCodeShot
             {
                 _lastActive = DateTime.Now;
                 var prevWindow = GetForegroundWindow();
+                // 隐藏开关来自 config.json 的 hideTarget（默认关，与主进程按钮的选项一致）
+                if (HideTargetEnabled())
+                {
+                    var z = FindZCodeWindow();
+                    HideTarget(z);
+                    Thread.Sleep(120);   // SW_HIDE 瞬时完成，留一帧让桌面重绘
+                }
                 Bitmap savedBitmap = RunOverlay();
+                ShowTargetBack();
                 if (savedBitmap != null)
                 {
                     PasteToPreviousWindow(prevWindow, savedBitmap);
@@ -415,8 +446,21 @@ namespace ZCodeShot
             }
             finally
             {
+                ShowTargetBack();
                 _capturing = false;
             }
+        }
+
+        static bool HideTargetEnabled()
+        {
+            try
+            {
+                var json = File.ReadAllText(ConfigPath);
+                var m = Regex.Match(json, "\"hideTarget\"\\s*:\\s*(true|false)");
+                if (m.Success) return m.Groups[1].Value == "true";
+            }
+            catch { }
+            return false;
         }
 
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
